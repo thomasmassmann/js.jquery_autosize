@@ -23,6 +23,8 @@ setup(
     keywords='',
     author='Thomas Massmann',
     author_email='thomas.massmann@it-spir.it',
+    url='https://bitbucket.org/it_spirit/js.jquery_autosize',
+    download_url='http://pypi.python.org/pypi/js.jquery_autosize',
     license='BSD',
     packages=find_packages(),
     namespace_packages=['js'],
