@@ -1,20 +1,21 @@
 /*!
-	Autosize v1.17.1 - 2013-06-23
-	Automatically adjust textarea height based on user input.
-	(c) 2013 Jack Moore - http://www.jacklmoore.com/autosize
-	license: http://www.opensource.org/licenses/mit-license.php
+	Autosize 1.18.13
+	license: MIT
+	http://www.jacklmoore.com/autosize
 */
 (function ($) {
 	var
 	defaults = {
 		className: 'autosizejs',
-		append: '',
+		id: 'autosizejs',
+		append: '\n',
 		callback: false,
-		resizeDelay: 10
+		resizeDelay: 10,
+		placeholder: true
 	},
 
-	// border:0 is unnecessary, but avoids a bug in FireFox on OSX
-	copy = '<textarea tabindex="-1" style="position:absolute; top:-999px; left:0; right:auto; bottom:auto; border:0; -moz-box-sizing:content-box; -webkit-box-sizing:content-box; box-sizing:content-box; word-wrap:break-word; height:0 !important; min-height:0 !important; overflow:hidden; transition:none; -webkit-transition:none; -moz-transition:none;"/>',
+	// border:0 is unnecessary, but avoids a bug in Firefox on OSX
+	copy = '<textarea tabindex="-1" style="position:absolute; top:-999px; left:0; right:auto; bottom:auto; border:0; padding: 0; -moz-box-sizing:content-box; -webkit-box-sizing:content-box; box-sizing:content-box; word-wrap:break-word; height:0 !important; min-height:0 !important; overflow:hidden; transition:none; -webkit-transition:none; -moz-transition:none;"/>',
 
 	// line-height is conditionally included because IE7/IE8/old Opera do not return the correct value.
 	typographyStyles = [
@@ -25,7 +26,8 @@
 		'letterSpacing',
 		'textTransform',
 		'wordSpacing',
-		'textIndent'
+		'textIndent',
+		'whiteSpace'
 	],
 
 	// to keep track which textarea is being mirrored when adjust() is called.
@@ -42,6 +44,10 @@
 	mirror.style.lineHeight = '';
 
 	$.fn.autosize = function (options) {
+		if (!this.length) {
+			return this;
+		}
+
 		options = $.extend({}, defaults, options || {});
 
 		if (mirror.parentNode !== document.body) {
@@ -64,7 +70,8 @@
 				resize: ta.style.resize
 			},
 			timeout,
-			width = $ta.width();
+			width = $ta.width(),
+			taResize = $ta.css('resize');
 
 			if ($ta.data('autosize')) {
 				// exit if autosize has already been applied, or if the textarea is the mirror element.
@@ -82,15 +89,45 @@
 			$ta.css({
 				overflow: 'hidden',
 				overflowY: 'hidden',
-				wordWrap: 'break-word', // horizontal overflow is hidden, so break-word is necessary for handling words longer than the textarea width
-				resize: ($ta.css('resize') === 'none' || $ta.css('resize') === 'vertical') ? 'none' : 'horizontal'
+				wordWrap: 'break-word' // horizontal overflow is hidden, so break-word is necessary for handling words longer than the textarea width
 			});
 
+			if (taResize === 'vertical') {
+				$ta.css('resize','none');
+			} else if (taResize === 'both') {
+				$ta.css('resize', 'horizontal');
+			}
+
+			// The mirror width must exactly match the textarea width, so using getBoundingClientRect because it doesn't round the sub-pixel value.
+			// window.getComputedStyle, getBoundingClientRect returning a width are unsupported, but also unneeded in IE8 and lower.
+			function setWidth() {
+				var width;
+				var style = window.getComputedStyle ? window.getComputedStyle(ta, null) : false;
+				
+				if (style) {
+
+					width = ta.getBoundingClientRect().width;
+
+					if (width === 0 || typeof width !== 'number') {
+						width = parseInt(style.width,10);
+					}
+
+					$.each(['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'], function(i,val){
+						width -= parseInt(style[val],10);
+					});
+				} else {
+					width = $ta.width();
+				}
+
+				mirror.style.width = Math.max(width,0) + 'px';
+			}
+
 			function initMirror() {
-				var styles = {}, ignore;
+				var styles = {};
 
 				mirrored = ta;
 				mirror.className = options.className;
+				mirror.id = options.id;
 				maxHeight = parseInt($ta.css('maxHeight'), 10);
 
 				// mirror is a duplicate textarea located off-screen that
@@ -101,14 +138,18 @@
 				$.each(typographyStyles, function(i,val){
 					styles[val] = $ta.css(val);
 				});
-				$(mirror).css(styles);
+				
+				$(mirror).css(styles).attr('wrap', $ta.attr('wrap'));
 
-				// The textarea overflow is probably now hidden, but Chrome doesn't reflow the text to account for the
-				// new space made available by removing the scrollbars. This workaround causes Chrome to reflow the text.
-				if ('oninput' in ta) {
+				setWidth();
+
+				// Chrome-specific fix:
+				// When the textarea y-overflow is hidden, Chrome doesn't reflow the text to account for the space
+				// made available by removing the scrollbar. This workaround triggers the reflow for Chrome.
+				if (window.chrome) {
 					var width = ta.style.width;
 					ta.style.width = '0px';
-					ignore = ta.offsetWidth; // This value isn't used, but getting it triggers the necessary reflow
+					var ignore = ta.offsetWidth;
 					ta.style.width = width;
 				}
 			}
@@ -116,33 +157,28 @@
 			// Using mainly bare JS in this function because it is going
 			// to fire very often while typing, and needs to very efficient.
 			function adjust() {
-				var height, original, width, style;
+				var height, original;
 
 				if (mirrored !== ta) {
 					initMirror();
+				} else {
+					setWidth();
 				}
 
-				mirror.value = ta.value + options.append;
+				if (!ta.value && options.placeholder) {
+					// If the textarea is empty, copy the placeholder text into 
+					// the mirror control and use that for sizing so that we 
+					// don't end up with placeholder getting trimmed.
+					mirror.value = ($ta.attr("placeholder") || '');
+				} else {
+					mirror.value = ta.value;
+				}
+
+				mirror.value += options.append || '';
 				mirror.style.overflowY = ta.style.overflowY;
 				original = parseInt(ta.style.height,10);
 
-				// window.getComputedStyle, getBoundingClientRect returning a width are unsupported in IE8 and lower.
-				// The mirror width must exactly match the textarea width, so using getBoundingClientRect because it doesn't round the sub-pixel value.
-				if ('getComputedStyle' in window) {
-					style = window.getComputedStyle(ta);
-					width = ta.getBoundingClientRect().width;
-
-					$.each(['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'], function(i,val){
-						width -= parseInt(style[val],10);
-					});
-
-					mirror.style.width = width + 'px';
-				}
-				else {
-					mirror.style.width = Math.max($ta.width(), 0) + 'px';
-				}
-
-				// Needed for IE8 and lower to reliably return the correct scrollTop
+				// Setting scrollTop to zero is needed in IE8 and lower for the next step to be accurately applied
 				mirror.scrollTop = 0;
 
 				mirror.scrollTop = 9e4;
@@ -162,18 +198,22 @@
 
 				height += boxOffset;
 
-				if (original !== height) {						
+				if (original !== height) {
 					ta.style.height = height + 'px';
 					if (callback) {
 						options.callback.call(ta,ta);
 					}
+					$ta.trigger('autosize.resized');
 				}
 			}
 
 			function resize () {
 				clearTimeout(timeout);
 				timeout = setTimeout(function(){
-					if ($ta.width() !== width) {
+					var newWidth = $ta.width();
+
+					if (newWidth !== width) {
+						width = newWidth;
 						adjust();
 					}
 				}, parseInt(options.resizeDelay,10));
@@ -211,9 +251,9 @@
 
 			// Event for manual triggering that also forces the styles to update as well.
 			// Should only be needed if one of typography styles of the textarea change, and the textarea is already the target of the adjust method.
-			$ta.on('autosize.resizeIncludeStyle', function() { 
-				mirrored = null; 
-				adjust(); 
+			$ta.on('autosize.resizeIncludeStyle', function() {
+				mirrored = null;
+				adjust();
 			});
 
 			$ta.on('autosize.destroy', function(){
@@ -231,4 +271,4 @@
 			adjust();
 		});
 	};
-}(window.jQuery || window.Zepto));
+}(jQuery || $)); // jQuery or jQuery-like library, such as Zepto
